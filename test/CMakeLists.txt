@@ -2,7 +2,7 @@ enable_testing()
 INCLUDE(CTest)
 
 LINK_DIRECTORIES(${MAINFOLDER}/lib)
-SET (test_LIBS ${PROJECT_NAME} m)
+SET (test_LIBS ${PROJECT_NAME} -lm)
 
 SET( test_SRCS
 	main_test

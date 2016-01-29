@@ -1,6 +1,10 @@
 #include<stdio.h>
+#include "memory_allocator/memory_manager.h"
 
 int main(void) {
-    printf("Hello World\n");
-    return 0;
+	memory_manager_init();
+    	void *memory = memory_manager_allocate(32);     
+    	memory_manager_free(memory); 
+    memory_manager_shutdown();
+   return 0;
 }
