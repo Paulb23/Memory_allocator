@@ -1,6 +1,6 @@
 /*--------------------------------------------------------------------------*/
 /**
-   @file    splash_begin_code.h
+   @file    begin_code.h
    @author  P. Batty
    @brief   Preprocessor dll exports
    This module implements Preprocessor dll exports
