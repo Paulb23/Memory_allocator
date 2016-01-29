@@ -5,3 +5,5 @@
 /.settings
 /.cproject
 /.project
+/lib/*
+!/lib/*.txt
