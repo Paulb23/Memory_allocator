@@ -35,6 +35,8 @@ INCLUDE_DIRECTORIES("${MAINFOLDER}/include")
 #
 # Enable all warnings
 #
+SET(CMAKE_C_FLAGS "-std=c99 ${CMAKE_C_FLAGS}")
+
 IF(CMAKE_BUILD_TOOL MATCHES "(msdev|devenv|nmake)")
   # Use the highest warning level for visual studio.
   IF(CMAKE_CXX_FLAGS MATCHES "/W[0-4]")
@@ -45,7 +47,7 @@ IF(CMAKE_BUILD_TOOL MATCHES "(msdev|devenv|nmake)")
   IF(CMAKE_C_FLAGS MATCHES "/W[0-4]")
     STRING(REGEX REPLACE "/W[0-4]" "/W4" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
   ELSE(CMAKE_C_FLAGS MATCHES "/W[0-4]")
-    SET(CMAKE_C_FLAGS "-O3 ${CMAKE_C_FLAGS} /W4")
+    SET(CMAKE_C_FLAGS "-O3 -${CMAKE_C_FLAGS} /W4")
   ENDIF(CMAKE_C_FLAGS MATCHES "/W[0-4]")
   # Disable deprecation warnings for standard C functions in VS2005 and later
   IF(CMAKE_COMPILER_2005)

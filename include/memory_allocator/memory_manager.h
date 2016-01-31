@@ -17,17 +17,30 @@
 #define extern "C" {
 #endif
 
+/*------------------------*/
+//	Structures			  //
+/*------------------------*/   
 
 /* Represents a page of memory. */
-typedef struct small_memory_page {
-	void *memory;						/* the block of memory */
-	uint32_t size;						/* size of the page */
-	struct small_memory_page *next;		/* the next page */
-	struct small_memory_page *previous;	/* the previous page*/
-	uint32_t largestFreeEntry;			/* largest free entry on this page */
-	void *firstFreeEntry;				/* first free entry on this page*/
-} small_memory_page; 
+typedef struct memory_page {
+	struct memory_page *next;		/* the next page */
+	struct memory_page *previous;	/* the previous page */
+	void *memory;					/* the block of memory */
+} memory_page; // 12 bytes
 
+
+/* Represents a bucket */
+typedef struct memory_bucket {
+	uint32_t count;					/* number of memory pages within this bucket */
+	uint32_t memoryPageSize;		/* size of the Memory pages within this bucket */
+	memory_page *freeList;			/* freeList of memory pages */
+	memory_page *pages;				/* used list of memory pages */
+} memory_bucket;	//
+
+
+/*------------------------*/
+//	Methods				  //
+/*------------------------*/   
 
 extern DLL_EXPORT void CALL memory_manager_init();		/* initilises the module */
 extern DLL_EXPORT void CALL memory_manager_shutdown();  /* Shutdown the module */

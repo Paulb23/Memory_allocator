@@ -13,40 +13,35 @@
 #include <stdint.h>
 #include <string.h>
 
-/*------------------------*/
-//	defines varables	  //
-/*------------------------*/  
-
-#define ALIGN_SIZE( size )		( ((size) + ALIGN - 1) & ~(ALIGN - 1) )
-
 
 /*------------------------*/
 //	Private varables	  //
 /*------------------------*/   
 
-enum {
-	ALIGN = 8
+static uint32_t bucketSizes[] = {									/* 42 Diffrent bucket sizes must be multiple of two*/
+	8,		16,		32,		48,		64,		80,		96,		112,
+	128,	160,	192,	224,	256,	288,	320,	384,
+	448,	512,	576,	640,	704,	768,	896,	1024,
+	1168,	1360,	1632,	2048,	2336,	2720,	3264,	4096,
+	4672,	5456,	6544,	8192,	9360,	10912,	13104,	16384,
+	21840,	327684
 };
 
-static uint32_t pageSize;									/* the page size */
+static uint32_t numberOfBuckets = sizeof(bucketSizes);			/* number of buckets */
 
-static void 			 *smallFirstFree[256 / ALIGN + 1 ];	/* small heap allocator (for allocs of 1-255 bytes) */
-static small_memory_page *lastSmallUsedPage;  				/* last used page */
-static small_memory_page *currentSmallPage; 				/* the current page we are using */
-static uint32_t 		  currentSmallPageOffset;   		/* the offset on the current page */
+static memory_bucket buckets[sizeof(bucketSizes)];				/* buckets */
 
 
 /*------------------------*/
 //	Private methods		  //
 /*------------------------*/   
 
-static small_memory_page *allocate_os_page( const uint32_t size );	/* allocate a page from OS */
-static void free_os_page( small_memory_page *page ); 				/* free's a page from the OS */
+static memory_page *allocate_os_page( const uint32_t size );	/* allocate a page from OS */
+static void free_os_page( memory_page *page ); 					/* free's a page from the OS */
 
-static void *allocate_small_entry( const uint32_t size ); 			/* alloctes a small memory */
+static void *allocate_entry( const uint32_t size ); 			/* alloctes a small entry */
 
-static void free_small_entry( void *entry );						/* frees a memory page */   
-	
+static void free_entry( memory_page *entry , const uint32_t size);		/* frees a entry */   
 
 /*------------------------*/
 //	Interface methods	  //
@@ -56,48 +51,73 @@ static void free_small_entry( void *entry );						/* frees a memory page */
  Initilises the module.
 */
 void memory_manager_init() {
-	pageSize = 65536 - sizeof( small_memory_page ); /* default page size,  16 bit max = 65536*/
+	for (uint32_t i = numberOfBuckets + 1; i > 0; --i) {		/* initilise starting buckets*/
+		buckets[i].count = 1;
+		buckets[i].memoryPageSize = bucketSizes[i];
 
-	memset( smallFirstFree, 0, sizeof( smallFirstFree ) );
+			memory_page *firstPage = allocate_os_page(bucketSizes[i]);;
+			memory_page *currentPage = firstPage;
+			for(uint32_t j = 0; j < i / 14; ++j) {
+				buckets[i].count += 1;
 
-	lastSmallUsedPage = NULL;
-	currentSmallPageOffset = ALIGN_SIZE( 0 );
-	currentSmallPage = allocate_os_page( pageSize );
+				memory_page *page = allocate_os_page(bucketSizes[i]);
+
+				currentPage->next = page;
+				page->previous = currentPage;
+
+				currentPage = page;
+			}
+
+		buckets[i].freeList = firstPage;	
+		buckets[i].pages = firstPage;		
+	}
 }
 
 /*
  Shutdown the module
 */
 void memory_manager_shutdown() {
-	if (currentSmallPage) {
-		free_os_page(currentSmallPage);
-	}
+	for (uint32_t i = numberOfBuckets + 1; i > 0; --i) {		/* free all buckets */
 
-	small_memory_page *page = lastSmallUsedPage;
-	while(page) {
-		small_memory_page *next = page->next;
-		free_os_page(page);
-		page = next;
+		memory_page *currentPage = buckets[i].pages;			/* free used list */
+		while(currentPage != NULL) {
+			memory_page *nextPage = currentPage->next;
+			free_os_page(currentPage);
+			currentPage = nextPage;
+		}		
 	}
 }
 
 #ifndef DEBUG
 
+/*
+ Allocates a entry
+ size = size of entry
+*/
 void *memory_manager_allocate(const uint32_t size) {
-	if (!size) {
+	if (!size) {						/* check it#s greater then 0 */
 		return NULL;
 	}
-	if (!(size & ~255)) {
-		return allocate_small_entry(size);
+	if (!(size & ~327684)) {			/* if we have a bucket big enough */
+		return allocate_entry(size);
 	}
-	return NULL;
+	return malloc(size);				/* else collect from the os */
 }
 
+/*
+ Frees a entry
+ entry = entry to free
+*/
 void memory_manager_free(void *memory) {
-	if (!memory) {
+	if (!memory) {											/* check it's not null */
 		return;
 	}
-	free_small_entry(memory);
+	uint32_t size = sizeof(memory) + sizeof(memory_page);	/* get the real size of the page */
+	if (!(size & ~327684)) {								/* if we have a bucket big enough */					
+		free_entry(memory - sizeof(memory_page), size);
+	} else {
+		free(memory);										/* else its an os page */
+	}
 }
 
 #else
@@ -129,30 +149,25 @@ void memory_manager_dump(void *memory, const char *filename, const int lineNumbe
 /*
  Allocates a OS page
   size = size in bytes
-  returns small_memory_page
+  returns memory_page
 */
-static small_memory_page *allocate_os_page( const uint32_t size ) {
-	small_memory_page *page = malloc( (size + sizeof( small_memory_page )) + ALIGN - 1 ); /* create the page, plus struct size */
-	
+static memory_page *allocate_os_page( const uint32_t size ) {
+	memory_page *page = malloc( size + sizeof(memory_page) );
 	if (!page) {
 		exit(0);
 	}
 
-	page->memory = (void *) ALIGN_SIZE( (int32_t)((int8_t)(page) + sizeof( small_memory_page ) ));					
-	page->size = size;				
+	page->memory = (void *)(int32_t)((int8_t)(page) + sizeof(memory_page));
 	page->next = NULL;
 	page->previous = NULL;
-	page->largestFreeEntry = 0;
-	page->firstFreeEntry = NULL;
-
 	return page;
 }
 
 /*
  free's a page from the OS
-  page = small_memory_page
+  page = memory_page
 */
-static void free_os_page( small_memory_page *page ) {
+static void free_os_page( memory_page *page ) {
 	if (!page) {
 		return;
 	}
@@ -160,52 +175,49 @@ static void free_os_page( small_memory_page *page ) {
 }
 
 /*
- Allocates a small entry.
-  size = 1 - 255.
+ Allocates a entry.
+  size = 1 - 327684
   returns pointer to entry.
 */
-static void *allocate_small_entry( uint32_t size ) {
+static void *allocate_entry( uint32_t size ) {
+	int low = 0, high = numberOfBuckets + 1;
 
-	if (size < sizeof( uint32_t ) ) {
-		size = sizeof( uint32_t );
-	}
-
-	size = ALIGN_SIZE( size );
-
-	int8_t *smallEntry = (int8_t *)(smallFirstFree[size / ALIGN]);	/* allocate */
-	if ( smallEntry ) {
-		smallFirstFree[size / ALIGN] = (void *)(*smallEntry);
-		return smallEntry;
-	}
-
-	uint32_t bytesLeft = pageSize - currentSmallPageOffset;	/* Check we have enough room */
-	if (size >= bytesLeft) {								/* else allocate new OS pages */
-		currentSmallPage->next = lastSmallUsedPage;
-		lastSmallUsedPage = currentSmallPage;
-		currentSmallPage = allocate_os_page( pageSize );
-		if (!currentSmallPage) {
-			return NULL;
+	while (low != high) {
+		int mid = (low + high) / 2;
+		if (bucketSizes[mid] <= size) {
+			low = mid + 1;
+		} else {
+			high = mid;
 		}
-		currentSmallPageOffset = ALIGN_SIZE ( 0 );
 	}
-
-	smallEntry = ((int8_t *)currentSmallPage->memory) + currentSmallPageOffset;
-	currentSmallPageOffset += size;
-	return (smallEntry);
+	memory_page *page = buckets[low].freeList;
+	if (!page) {
+		buckets[low].count += 1;
+		page = allocate_os_page(bucketSizes[low]);
+		buckets[low].pages->previous = page;
+		page->next = buckets[low].pages;
+		buckets[low].pages = page;
+	}
+	buckets[low].freeList = page->next;
+	return page->memory;
 }
 
 /* 
  frees a memory entry 
 */ 
-void free_small_entry( void *entry ) {
-//	int8_t *d = ( (int8_t *)entry );
-//	uint32_t *dt = (uint32_t *)entry;
+void free_entry( memory_page *entry, const uint32_t size ) {
+	int low = 0, high = numberOfBuckets + 1;
 
-//	uint32_t ix = *d;
-//	if (ix > (256 / ALIGN)) {
-//		exit(0);
-//	}
-//
-//	*dt = (uint32_t)smallFirstFree[ix];
-//	smallFirstFree[ix] = (void *)d;
-}			  
+	while (low != high) {
+		int mid = (low + high) / 2;
+		if (bucketSizes[mid] <= size) {
+			low = mid + 1;
+		} else {
+			high = mid;
+		}
+	}
+	memory_page *page = buckets[low].freeList;
+	page->previous = entry;
+	entry->next = page;
+	buckets[low].freeList = entry;
+}
